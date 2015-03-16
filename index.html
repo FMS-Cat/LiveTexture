@@ -1,0 +1,455 @@
+<!--
+
+References
+	Wood texture belongs to me. feel free to use anywhere.
+
+	Metal texture by suppami
+	http://suppami.exblog.jp/492267
+
+-->
+
+<!DOCTYPE html>
+
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no">
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+		<style type="text/css">
+		*
+		{
+			-moz-user-select : none;
+			-webkit-user-select : none;
+			-ms-user-select : none;
+		}
+
+		#canvas
+		{
+			position : absolute;
+			left : 0px;
+			top : 0px;
+		}
+		</style>
+	</head>
+	<body>
+
+		<script id="vert" type="x-shader/x-vertex">
+			attribute vec3 a_pos;
+			attribute vec3 a_nor;
+			attribute vec3 a_col;
+			varying vec3 v_pos;
+			varying vec3 v_nor;
+			varying vec3 v_col;
+			varying mat4 v_matrix;
+			uniform mat4 u_matrixM;
+			uniform mat4 u_matrixV;
+			uniform mat4 u_matrixP;
+
+			void main()
+			{
+				v_pos = a_pos;
+				v_nor = a_nor;
+				v_col = a_col;
+
+				v_matrix = u_matrixM;
+				gl_Position = u_matrixP*u_matrixV*u_matrixM*vec4( a_pos, 1.0 );
+			}
+		</script>
+
+		<script id="frag" type="x-shader/x-fragment">
+			precision mediump float;
+
+			varying vec3 v_pos;
+			varying vec3 v_nor;
+			varying vec3 v_col;
+			varying mat4 v_matrix;
+			uniform float u_t;
+			uniform vec2 u_r;
+			uniform float u_phase;
+			uniform sampler2D u_texture;
+			uniform sampler2D u_perlin;
+			uniform sampler2D u_cameraTexture;
+			uniform vec3 u_camera;
+			uniform vec3 u_light;
+			uniform bool u_camLightEnable;
+
+			#define t u_t*.01
+			#define r u_r
+			#define v vec2(0.,1.)
+			#define cl(i) clamp(i,0.,1.)
+
+			#define DELTA0 1E-3
+			#define DELTA1 2E-3
+			#define DELTA2 4E-3
+
+			float rgbAverage( vec3 _v )
+			{
+				return (_v.x+_v.y+_v.z)/3.;
+			}
+
+			void main()
+			{
+				vec3 col = v.xxx;
+
+				vec2 p = ( v_matrix*vec4( v_col.xy, 0., 0. ) ).xy;
+
+				vec3 pos = (v_matrix*vec4(v_pos,1.)).xyz;
+				vec3 nor = normalize((v_matrix*vec4(v_nor,0.)).xyz);
+				vec3 cam = u_camera;
+
+				vec3 lightPos = u_light;
+				if( lightPos.z < 0. ){
+					lightPos = -lightPos;
+				}
+				vec3 lightCol = v.yyy;
+				if( u_camLightEnable )
+				{
+					lightCol = v.xxx;
+					vec3 lightMax = v.xxx;
+
+					for( float iy=.1; iy<1.; iy+=.2 ){
+						for( float ix=.1; ix<1.; ix+=.2 ){
+							vec3 tempTex = texture2D( u_cameraTexture, vec2( ix, iy ) ).xyz;
+							lightCol += tempTex/12.;
+						}
+					}
+
+				}
+
+				if( u_phase == 0. )
+				{
+					vec3 tex = texture2D( u_texture, p.xy ).xyz;
+					p = p + normalize( lightPos-pos ).xy*(rgbAverage(tex)-.5)*.01;
+					tex = texture2D( u_texture, p ).xyz;
+
+					vec2 delta = vec2(
+						rgbAverage( ( texture2D( u_texture, p.xy+v.yx*DELTA0 )-texture2D( u_texture, p.xy-v.yx*DELTA0 ) ).xyz ),
+						rgbAverage( ( texture2D( u_texture, p.xy+v.xy*DELTA0 )-texture2D( u_texture, p.xy-v.xy*DELTA0 ) ).xyz )
+					);
+					nor.x -= delta.x*2.;
+					nor.y -= delta.y*2.;
+					nor = normalize(nor);
+
+					col += cl( dot( nor, normalize( lightPos-pos ) ) )*tex*lightCol*.6; // dif
+					col += tex*lightCol*.4; // amb
+					col += pow( cl( dot( nor, normalize( normalize( lightPos-pos )+normalize( cam-pos ) ) ) )*1., 1E2 )*lightCol*.1; // spe
+				}
+
+				if( u_phase == 1. )
+				{
+					vec3 tex = texture2D( u_texture, p ).xyz;
+					p = p + normalize( lightPos-pos ).xy*(rgbAverage(tex)-.5)*.004;
+					tex = texture2D( u_texture, p ).xyz;
+
+					vec2 delta = vec2(
+						rgbAverage( ( texture2D( u_texture, p+v.yx*DELTA1 )-texture2D( u_texture, p-v.yx*DELTA1 ) ).xyz ),
+						rgbAverage( ( texture2D( u_texture, p+v.xy*DELTA1 )-texture2D( u_texture, p-v.xy*DELTA1 ) ).xyz )
+					);
+					nor.x -= delta.x*4.;
+					nor.y -= delta.y*4.;
+					nor = normalize(nor);
+
+					col += cl( dot( nor, normalize( lightPos-pos ) ) )*tex*lightCol*.6; // dif
+					col += tex*lightCol*.4; // amb
+					col += pow( cl( dot( nor, normalize( normalize( lightPos-pos )+normalize( cam-pos ) ) ) )*1., 1E2 )*lightCol*.6; // spe
+				}
+
+				if( u_phase == 2. )
+				{
+					vec3 tex = texture2D( u_texture, cl(p.xy*2.-.5) ).xyz;
+
+					if( texture2D( u_texture, cl(p.xy*2.-.5) ).w<.5 ){
+						tex = v.yyy*.3;
+
+						vec2 ps = mod( p, 1./20. );
+						vec2 pl = floor( p*20. )/20.;
+						float spe = cl( dot( nor, normalize( normalize( lightPos-pos )+normalize( cam-pos ) ) ) );
+						float pat = cl( pow( abs( dot( normalize( vec2( ps.x-.025, ps.y-.025 )*1E3 ), normalize( (lightPos+v.xyx*1.).xy ) ) ), 10. ) );
+						vec3 base = vec3(
+							sin( exp(spe)*17. )*.5+.5,
+							sin( exp(spe)*17.+1. )*.5+.5,
+							sin( exp(spe)*17.+2. )*.5+.5
+						);
+						col += base*pat*.6; // holo
+					}
+
+					vec2 delta = vec2(
+						( texture2D( u_perlin, p.xy*.8+.1+v.yx*DELTA2 )-texture2D( u_perlin, p.xy*.8+.1-v.yx*DELTA2 ) ).x,
+						( texture2D( u_perlin, p.xy*.8+.1+v.xy*DELTA2 )-texture2D( u_perlin, p.xy*.8+.1-v.xy*DELTA2 ) ).x
+					);
+					nor.x -= delta.x*2.;
+					nor.y -= delta.y*2.;
+					nor = normalize(nor);
+
+					col += dot( nor, normalize( lightPos-pos ) )*tex*lightCol*.6; // dif
+					col += tex*lightCol*.4; // amb
+					col += pow( cl( dot( nor, normalize( normalize( lightPos-pos )+normalize( cam-pos ) ) ) ), 8E2 )*lightCol*.7; // spe
+				}
+
+				gl_FragColor = vec4( col, 1. );
+			}
+		</script>
+
+		<script src="catMAT.js"></script>
+		<script src="catGL.js"></script>
+		<script src="camera.js"></script>
+
+		<script>
+
+			var cvs = document.createElement( 'canvas' );
+			cvs.id = 'canvas';
+			cvs.width = window.innerWidth;
+			cvs.height = window.innerHeight;
+			document.body.appendChild( cvs );
+
+			var gl=cvs.getContext( 'webgl' );
+
+			gl.enable( gl.DEPTH_TEST );
+			gl.enable( gl.CULL_FACE );
+			gl.enable( gl.BLEND );
+			gl.blendFuncSeparate( gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE );
+
+			var prg = CatGL.createProgram( 'vert', 'frag' );
+			CatGL.program = prg;
+
+			var ob = new CatGL.Object();
+			ob.poly( [-1,-1,0,1,-1,0,1,1,0,-1,1,0], 0. );
+			ob.setBuffer();
+
+			var cube = new CatGL.Object();
+			cube.polyCube( [.1,.1,.1], 0. );
+			cube.setBuffer();
+
+			var texWood = new CatGL.Texture();
+			texWood.setUrl( 'wood.png' );
+			var texMetal = new CatGL.Texture();
+			texMetal.setUrl( 'metal.png' );
+			var texMonmo = new CatGL.Texture();
+			texMonmo.setUrl( 'monmo.png' );
+
+			var texPerlin = new CatGL.Texture();
+			texPerlin.setUrl( 'perlin.png' );
+
+			var cam = new Camera();
+			var texCam = new CatGL.Texture();
+
+			var t = 0;
+			var mouseX = 0;
+			var mouseY = 0;
+			var accel = [ 0, 0, 10 ];
+			var accelD = [ 0, 0, 10 ];
+
+			var camPos = [ 0, 0, 1 ];
+			var matV = CatMAT.lookAt( camPos, [0,0,0], [0,1,0] );
+			var matP = CatMAT.perspective( 70, cvs.width/cvs.height, .01, 100 );
+
+			var selected = 0;
+			var selectedAni = 0;
+			var selectedMaterial = 0;
+
+			var touched = false;
+			var lastTap = 0;
+			var lightEnable = true;
+			var accelMemory = [ 0, 0, 10 ];
+			var camLightEnable = false;
+
+			var noSmooth = false;
+			(function(){
+				var regexp = /#(.+)/.exec( location.href );
+				if( regexp ){
+					if( regexp[1] == 'noSmooth' ){
+						noSmooth = true;
+					}
+				}
+			}());
+
+			document.addEventListener( 'touchstart', function( _e ){
+
+				_e.preventDefault();
+
+				try{
+					cvs.requestFullScreen = cvs.requestFullScreen || cvs.mozRequestFullScreen || cvs.webkitRequestFullScreen;
+					cvs.requestFullScreen();
+				}catch( _e ){
+				}
+
+				resize();
+
+				touched = true;
+				if( _e.touches.length == 1 ){
+					touch1( _e.touches[0].clientX, _e.touches[0].clientY );
+				}
+				if( _e.touches.length == 2 ){
+					touch2();
+				}
+				if( _e.touches.length == 3 ){
+					touch3();
+				}
+
+			} );
+
+			document.addEventListener( 'mousedown', function( _e ){
+
+				_e.preventDefault();
+
+				if( !touched ){
+					if( _e.which == 1 ){
+						touch1( _e.clientX, _e.clientY );
+					}
+					if( _e.which == 3 ){
+						touch3();
+					}
+				}
+
+			} );
+
+			function touch1( _x, _y ){
+
+				if( t-lastTap < 20 ){
+					mouseX = _x/window.innerWidth*2-1;
+					mouseY = -_y/window.innerHeight*2+1;
+
+					if( selected ){
+						selected = 0;
+					}else{
+						var p = CatMAT.raycastZ0( CatMAT.multiply( matP, matV ), camPos, mouseX, mouseY );
+						if( Math.abs(p[0])<1 ){
+							if(Math.abs(p[1]-.5)<.2){
+								selectedMaterial = 0;
+								selected = 1;
+							}
+							if(Math.abs(p[1])<.2){
+								selectedMaterial = 1;
+								selected = 1;
+							}
+							if(Math.abs(p[1]+.5)<.2){
+								selectedMaterial = 2;
+								selected = 1;
+							}
+						}
+					}
+				}
+				lastTap = t;
+
+			}
+
+			function touch2(){
+
+				accelMemory = accel;
+				lightEnable = !lightEnable;
+
+			}
+
+			function touch3(){
+				camLightEnable = !camLightEnable;
+			}
+
+			window.addEventListener( 'devicemotion', function(e){
+
+				accelD[0] = e.accelerationIncludingGravity.x;
+				accelD[1] = e.accelerationIncludingGravity.y;
+				accelD[2] = e.accelerationIncludingGravity.z;
+
+			}, true );
+
+			function loop(){
+
+				for( var i=0; i<3; i++ ){
+					if( noSmooth ){
+						accel[i] = ( lightEnable ? accelD[i] : accelMemory[i] );
+					}else{
+						accel[i] += ( ( lightEnable ? accelD[i] : accelMemory[i] ) - accel[i] )*.3;
+					}
+				}
+
+				selectedAni += ( selected - selectedAni )*.12;
+
+				gl.clearColor( 0., 0., 0., 1. );
+				gl.clearDepth( 1. );
+				gl.clear( gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT );
+
+				gl.uniform1f( gl.getUniformLocation( prg, 'u_t' ), t );
+				gl.uniform2fv( gl.getUniformLocation( prg, 'u_r' ), [cvs.width,cvs.height] );
+				gl.uniform3fv( gl.getUniformLocation( prg, 'u_camera' ), camPos );
+				gl.uniform3fv( gl.getUniformLocation( prg, 'u_light' ), accel );
+
+				matP = CatMAT.perspective( 70, cvs.width/cvs.height, .01, 100 );
+				gl.uniformMatrix4fv( gl.getUniformLocation( prg, 'u_matrixP' ), false, matP );
+
+				matV = CatMAT.lookAt( camPos, [0,0,0], [0,1,0] );
+				gl.uniformMatrix4fv( gl.getUniformLocation( prg, 'u_matrixV' ), false, matV );
+
+				gl.activeTexture( gl.TEXTURE1 );
+				gl.bindTexture( gl.TEXTURE_2D, texPerlin.texture );
+				gl.uniform1i( gl.getUniformLocation( prg, 'u_perlin' ), 1 );
+
+				gl.activeTexture( gl.TEXTURE2 );
+				if( camLightEnable ){
+					cam.capture();
+					texCam.setImage( cam.canvas );
+				}
+				gl.bindTexture( gl.TEXTURE_2D, texCam.texture );
+				gl.uniform1i( gl.getUniformLocation( prg, 'u_cameraTexture' ), 2 );
+				gl.uniform1i( gl.getUniformLocation( prg, 'u_camLightEnable' ), camLightEnable );
+
+				gl.activeTexture( gl.TEXTURE0 );
+				gl.uniform1i( gl.getUniformLocation( prg, 'u_texture' ), 0 );
+
+				(function(){
+					var phase = 0;
+					gl.uniform1f( gl.getUniformLocation( prg, 'u_phase' ), phase );
+					var sel = selectedMaterial == phase ? 1 : 0;
+					var matScale = CatMAT.scale( [1,.2+.8*selectedAni*sel,1] );
+					var matTrans = CatMAT.translate( [0,.5-.5*selectedAni*sel,.1*selectedAni*sel] );
+					var matM = CatMAT.multiply( matTrans, matScale );
+					gl.uniformMatrix4fv( gl.getUniformLocation( prg, 'u_matrixM' ), false, matM );
+					gl.bindTexture( gl.TEXTURE_2D, texWood.texture );
+					ob.draw();
+				}());
+
+				(function(){
+					var phase = 1;
+					gl.uniform1f( gl.getUniformLocation( prg, 'u_phase' ), phase );
+					var sel = selectedMaterial == phase ? 1 : 0;
+					var matScale = CatMAT.scale( [1,.2+.8*selectedAni*sel,1] );
+					var matTrans = CatMAT.translate( [0,0,.1*selectedAni*sel] );
+					var matM = CatMAT.multiply( matTrans, matScale );
+					gl.uniformMatrix4fv( gl.getUniformLocation( prg, 'u_matrixM' ), false, matM );
+					gl.bindTexture( gl.TEXTURE_2D, texMetal.texture );
+					ob.draw();
+				}());
+
+				(function(){
+					var phase = 2;
+					gl.uniform1f( gl.getUniformLocation( prg, 'u_phase' ), phase );
+					var sel = selectedMaterial == phase ? 1 : 0;
+					var matScale = CatMAT.scale( [1,.2+.8*selectedAni*sel,1] );
+					var matTrans = CatMAT.translate( [0,-.5+.5*selectedAni*sel,.1*selectedAni*sel] );
+					var matM = CatMAT.multiply( matTrans, matScale );
+					gl.uniformMatrix4fv( gl.getUniformLocation( prg, 'u_matrixM' ), false, matM );
+					gl.bindTexture( gl.TEXTURE_2D, texMonmo.texture );
+					ob.draw();
+				}());
+
+				gl.flush();
+
+				t ++;
+				requestAnimationFrame( loop );
+			}
+			requestAnimationFrame( loop );
+
+			function resize(){
+
+				var w = window.innerWidth;
+				var h = window.innerHeight;
+				cvs.width = w;
+				cvs.height = h;
+				gl.viewport( 0, 0, w, h );
+
+			}
+			resize();
+			window.onresize = resize;
+		</script>
+	</body>
+</html>

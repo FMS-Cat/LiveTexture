@@ -1,0 +1,327 @@
+<!--
+
+References
+	Wood texture belongs to me. feel free to use anywhere.
+
+	Metal texture by suppami
+	http://suppami.exblog.jp/492267
+
+-->
+
+<!DOCTYPE html>
+
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no">
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+		<style type="text/css">
+		*
+		{
+			-moz-user-select : none;
+			-webkit-user-select : none;
+			-ms-user-select : none;
+		}
+
+		a
+		{
+			color : #CCCCCC;
+		}
+
+		#canvas
+		{
+			position : absolute;
+			left : 0px;
+			top : 0px;
+		}
+		</style>
+	</head>
+	<body>
+		<script id="vert" type="x-shader/x-vertex">
+			attribute vec3 a_pos;
+			attribute vec3 a_nor;
+			attribute vec3 a_col;
+			varying vec3 v_pos;
+			varying vec3 v_nor;
+			varying vec3 v_col;
+			varying mat4 v_matrix;
+			uniform mat4 u_matrixM;
+			uniform mat4 u_matrixV;
+			uniform mat4 u_matrixP;
+
+			void main()
+			{
+				v_pos = a_pos;
+				v_nor = a_nor;
+				v_col = a_col;
+
+				v_matrix = u_matrixM;
+				gl_Position = u_matrixP*u_matrixV*u_matrixM*vec4( a_pos, 1.0 );
+			}
+		</script>
+
+		<script id="frag" type="x-shader/x-fragment">
+			precision mediump float;
+
+			varying vec3 v_pos;
+			varying vec3 v_nor;
+			varying vec3 v_col;
+			varying mat4 v_matrix;
+			uniform float u_t;
+			uniform vec2 u_r;
+			uniform sampler2D u_icon;
+			uniform sampler2D u_perlin;
+			uniform vec3 u_camera;
+			uniform vec3 u_light;
+
+			#define t u_t*.01
+			#define r u_r
+			#define v vec2(0.,1.)
+			#define cl(i) clamp(i,0.,1.)
+
+			#define DELTA 4E-3
+
+			void main()
+			{
+				vec3 col = v.xxx;
+
+				vec2 p = ( v_matrix*vec4( v_col.xy, 0., 0. ) ).xy;
+
+				vec3 pos = ( v_matrix*vec4( v_pos, 1. ) ).xyz;
+				vec3 nor = normalize( (v_matrix*vec4( v_nor, 0. ) ).xyz );
+				vec3 cam = u_camera;
+				vec3 lig = u_light;
+				if( lig.z < 0. ){
+					lig = -lig;
+				}
+
+				vec2 texp = vec2(-p.x*2.+1.5, p.y*2.-.5);
+				vec3 tex = texture2D( u_icon, texp ).xyz;
+
+				if( texture2D( u_icon, texp ).w<.5 || .25<abs(p.x-.5) || .25<abs(p.y-.5) ){
+					tex = v.yyy*.3;
+
+					vec2 ps = mod( p, 1./20. );
+					vec2 pl = floor( p*20. )/20.;
+					float spe = cl( dot( nor, normalize( normalize( lig-pos )+normalize( cam-pos ) ) ) );
+					float pat = cl( pow( abs( dot( normalize( vec2( ps.x-.025, ps.y-.025 )*1E3 ), normalize( (lig+v.xyx*1.).xy ) ) ), 10. ) );
+					vec3 base = vec3(
+						sin( exp(spe)*17. )*.5+.5,
+						sin( exp(spe)*17.+1. )*.5+.5,
+						sin( exp(spe)*17.+2. )*.5+.5
+					);
+					col += base*pat*.6; // holo
+				}
+
+				vec2 delta = vec2(
+					( texture2D( u_perlin, p.xy*.8+.1+v.yx*DELTA )-texture2D( u_perlin, p.xy*.8+.1-v.yx*DELTA ) ).x,
+					( texture2D( u_perlin, p.xy*.8+.1+v.xy*DELTA )-texture2D( u_perlin, p.xy*.8+.1-v.xy*DELTA ) ).x
+				);
+				nor.x -= delta.x*2.;
+				nor.y -= delta.y*2.;
+				nor = normalize(nor);
+
+				col += dot( nor, normalize( lig-pos ) )*tex*.6; // dif
+				col += tex*.4; // amb
+				col += pow( cl( dot( nor, normalize( normalize( lig-pos )+normalize( cam-pos ) ) ) ), 8E2 )*.7; // spe
+
+				gl_FragColor = vec4( col, 1. );
+			}
+		</script>
+
+		<script src="catMAT.js"></script>
+		<script src="catGL.js"></script>
+
+		<script>
+			var cvs = document.createElement( 'canvas' );
+			cvs.id = 'canvas';
+			cvs.width = window.innerWidth;
+			cvs.height = window.innerHeight;
+			document.body.appendChild( cvs );
+			var gl = cvs.getContext( 'webgl' );
+
+			var icon = document.createElement( 'canvas' );
+			icon.id = 'canvasIcon';
+			icon.width = 512;
+			icon.height = 512;
+//			document.body.appendChild( icon );
+			var iconContext = icon.getContext( '2d' );
+
+			var iconInput = document.createElement( 'input' );
+			iconInput.type = 'file';
+			iconInput.onchange = function( _e ){
+				var reader = new FileReader();
+				reader.readAsDataURL( _e.target.files[0] );
+
+				reader.onload = function( _e ){
+					var image = new Image();
+
+					image.onload = function(){
+						iconContext.clearRect( 0, 0, icon.width, icon.height );
+						iconContext.drawImage( this, 0, 0, icon.width, icon.height );
+					};
+
+					image.src = reader.result;
+				};
+			};
+
+			(function(){
+				var image = new Image();
+
+				image.onload = function(){
+					iconContext.drawImage( this, 0, 0, icon.width, icon.height );
+				};
+
+				image.src = './monmo.png';
+			}());
+
+			gl.enable( gl.DEPTH_TEST );
+			gl.enable( gl.CULL_FACE );
+			gl.enable( gl.BLEND );
+			gl.blendFuncSeparate( gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE );
+
+			var prg = CatGL.createProgram( 'vert', 'frag' );
+			CatGL.program = prg;
+
+			var ob = new CatGL.Object();
+			ob.poly( [-1,-1,0,1,-1,0,1,1,0,-1,1,0], 0. );
+			ob.setBuffer();
+
+			var texIcon = new CatGL.Texture();
+			texIcon.setImage( icon );
+
+			var texPerlin = new CatGL.Texture();
+			texPerlin.setUrl( 'perlin.png' );
+
+			var t = 0;
+			var mouseX = 0;
+			var mouseY = 0;
+			var accel = [ 0, 0, 10 ];
+			var accelD = [ 0, 0, 10 ];
+
+			var camPos = [ 0, 0, 1 ];
+
+			var touched = false;
+			var lastTap = 0;
+
+			document.addEventListener( 'touchstart', function( _e ){
+
+				_e.preventDefault();
+
+				try{
+					cvs.requestFullScreen = cvs.requestFullScreen || cvs.mozRequestFullScreen || cvs.webkitRequestFullScreen;
+					cvs.requestFullScreen();
+				}catch( _e ){
+				}
+
+				resize();
+
+				touched = true;
+
+				switch( _e.touches.length ){
+					case 1:
+						touch1();
+						break;
+					case 2:
+						touch2();
+						break;
+				}
+			} );
+
+			document.addEventListener( 'mousedown', function( _e ){
+
+				_e.preventDefault();
+
+				switch( _e.which ){
+					case 1:
+						touch1();
+						break;
+					case 3:
+						touch2();
+						break;
+				}
+			} );
+
+			var zoomD = 1;
+			function touch1( _x, _y ){
+
+				if( t-lastTap < 20 ){
+					zoomD = zoomD == 1 ? 2 : 1;
+				}
+
+				lastTap = t;
+
+			}
+
+			function touch2(){
+
+				iconInput.click();
+
+			}
+
+			window.addEventListener( 'devicemotion', function(e){
+				accelD[0] = e.accelerationIncludingGravity.x;
+				accelD[1] = e.accelerationIncludingGravity.y;
+				accelD[2] = e.accelerationIncludingGravity.z;
+			}, true );
+
+			function loop(){
+
+				resize();
+				camPos[2] += ( zoomD-camPos[2] )*.1;
+
+				for( var i=0; i<3; i++ ){
+					accel[i] += (accelD[i]-accel[i])*.7;
+				}
+
+				gl.clearColor( 0., 0., 0., 1. );
+				gl.clearDepth( 1. );
+				gl.clear( gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT );
+
+				gl.uniform1f( gl.getUniformLocation( prg, 'u_t' ), t );
+				gl.uniform2fv( gl.getUniformLocation( prg, 'u_r' ), [cvs.width,cvs.height] );
+				gl.uniform3fv( gl.getUniformLocation( prg, 'u_camera' ), camPos );
+				gl.uniform3fv( gl.getUniformLocation( prg, 'u_light' ), accel );
+
+				texIcon.setImage( icon );
+				gl.activeTexture( gl.TEXTURE0 );
+				gl.bindTexture( gl.TEXTURE_2D, texIcon.texture );
+				gl.uniform1i( gl.getUniformLocation( prg, 'u_icon' ), 0 );
+
+				gl.activeTexture( gl.TEXTURE1 );
+				gl.bindTexture( gl.TEXTURE_2D, texPerlin.texture );
+				gl.uniform1i( gl.getUniformLocation( prg, 'u_perlin' ), 1 );
+
+				var matP = CatMAT.perspective( 70, cvs.width/cvs.height, .01, 100 );
+				gl.uniformMatrix4fv( gl.getUniformLocation( prg, 'u_matrixP' ), false, matP );
+
+				var matV = CatMAT.lookAt( camPos, [0,0,0], [0,1,0] );
+				gl.uniformMatrix4fv( gl.getUniformLocation( prg, 'u_matrixV' ), false, matV );
+
+				var matM = CatMAT.identity();
+				gl.uniformMatrix4fv( gl.getUniformLocation( prg, 'u_matrixM' ), false, matM );
+				ob.draw();
+
+				gl.flush();
+
+				t++;
+				requestAnimationFrame( loop );
+
+			}
+			requestAnimationFrame( loop );
+
+			function resize(){
+
+				var w = window.innerWidth;
+				var h = window.innerHeight;
+				cvs.width = w;
+				cvs.height = h;
+				gl.viewport( 0, 0, w, h );
+
+			}
+			resize();
+			window.onresize = resize;
+		</script>
+	</body>
+</html>
